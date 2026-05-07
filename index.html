@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EML Attachment Extractor - Wyciąganie załączników z .eml i .zip</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+        .header h1 { font-size: 28px; margin-bottom: 0.5rem; font-weight: 600; }
+        .header p { font-size: 14px; opacity: 0.9; }
+        .content { padding: 2rem; }
+        #dropZone {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9ff;
+            margin-bottom: 1.5rem;
+        }
+        #dropZone:hover, #dropZone.dragover {
+            border-color: #764ba2;
+            background: #efefff;
+            transform: scale(1.01);
+        }
+        #dropZone .icon { font-size: 48px; margin-bottom: 1rem; }
+        #dropZone .title { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 0.5rem; }
+        #dropZone .subtitle { font-size: 14px; color: #666; }
+        #fileInput { display: none; }
+        .controls { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center; }
+        .btn-group { display: flex; background: #f0f0f0; border-radius: 8px; padding: 4px; }
+        .btn-group button {
+            padding: 0.6rem 1.25rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            background: transparent;
+            color: #555;
+        }
+        .btn-group button.active { background: white; color: #667eea; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .btn-download {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.6rem 1.25rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        .btn-download:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102,126,234,0.4); }
+        .btn-small {
+            padding: 0.45rem 1rem;
+            font-size: 13px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            color: #333;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .btn-small:hover { background: #f5f5f5; border-color: #667eea; color: #667eea; }
+        .status {
+            padding: 0.85rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 14px;
+            display: none;
+        }
+        .status.show { display: block; }
+        .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .status.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .stats {
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            padding: 1.25rem;
+            background: #f5f7ff;
+            border-radius: 8px;
+        }
+        .stat-card { text-align: center; }
+        .stat-value { font-size: 26px; font-weight: 700; color: #667eea; }
+        .stat-label { font-size: 11px; color: #999; margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .file-list { display: flex; flex-direction: column; gap: 0.65rem; }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1rem;
+            background: #f9f9f9;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            gap: 1rem;
+            transition: all 0.2s ease;
+        }
+        .file-item:hover { background: #f0f0ff; border-color: #c5c9f5; }
+        .file-info { display: flex; align-items: center; gap: 0.85rem; flex: 1; min-width: 0; }
+        .file-icon { font-size: 22px; min-width: 22px; }
+        .file-details { min-width: 0; flex: 1; }
+        .file-name { font-weight: 500; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+        .file-meta { font-size: 12px; color: #999; margin-top: 2px; }
+        .category-section { margin-bottom: 1.5rem; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
+        .category-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            background: linear-gradient(135deg, #f5f7ff 0%, #eef0ff 100%);
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .category-title-group { display: flex; align-items: center; gap: 0.85rem; }
+        .category-icon { font-size: 26px; }
+        .category-info h3 { font-size: 15px; color: #333; font-weight: 600; margin: 0; }
+        .category-info p { font-size: 12px; color: #999; margin: 2px 0 0 0; }
+        .category-file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.65rem 1.25rem;
+            border-bottom: 1px solid #f5f5f5;
+            gap: 1rem;
+            transition: background 0.15s ease;
+        }
+        .category-file-item:hover { background: #f9f9f9; }
+        .category-file-item:last-child { border-bottom: none; }
+        .download-all-row { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #eee; }
+        .btn-all { width: 100%; padding: 1rem; font-size: 15px; font-weight: 600; }
+        .empty-state { text-align: center; padding: 3rem 1rem; color: #bbb; font-size: 16px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>📧 EML Attachment Extractor</h1>
+        <p>Wyciągaj i segreguj załączniki z plików .eml i archiwów .zip</p>
+    </div>
+    <div class="content">
+        <div id="dropZone">
+            <div class="icon">📧</div>
+            <p class="title">Przeciągnij pliki .eml lub archiwum .zip tutaj</p>
+            <p class="subtitle">lub kliknij aby wybrać pliki z dysku</p>
+            <div style="display:flex;justify-content:center;gap:0.75rem;margin-top:1.25rem;flex-wrap:wrap;">
+                <span style="background:#e8eaff;color:#667eea;padding:0.35rem 0.9rem;border-radius:20px;font-size:13px;font-weight:500;">📄 .eml</span>
+                <span style="background:#e8eaff;color:#667eea;padding:0.35rem 0.9rem;border-radius:20px;font-size:13px;font-weight:500;">📦 .zip z plikami .eml</span>
+            </div>
+        </div>
+        <input type="file" id="fileInput" accept=".eml,.zip" multiple>
+
+        <!-- Baner prywatności -->
+        <div style="display:flex;align-items:flex-start;gap:0.75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1.5rem;">
+            <span style="font-size:22px;line-height:1.2;">🔒</span>
+            <div>
+                <p style="font-weight:600;color:#166534;font-size:14px;margin-bottom:0.35rem;">Twoje pliki są bezpieczne — przetwarzanie odbywa się wyłącznie lokalnie</p>
+                <p style="font-size:13px;color:#15803d;line-height:1.6;margin:0;">
+                    Żadne wgrane pliki, wiadomości e-mail ani załączniki <strong>nie są wysyłane na żaden serwer</strong> ani nigdzie zapisywane.
+                    Całe przetwarzanie odbywa się w pamięci Twojej przeglądarki na Twoim komputerze.
+                    Po zamknięciu lub odświeżeniu strony wszystkie dane są automatycznie usuwane z pamięci.
+                </p>
+            </div>
+        </div>
+
+        <div id="statusMsg" class="status"></div>
+        <div class="controls">
+            <div class="btn-group">
+                <button id="viewListBtn" class="active">📋 Lista</button>
+                <button id="viewCategoryBtn">📂 Kategorie</button>
+            </div>
+        </div>
+        <div id="stats" class="stats">
+            <div class="stat-card"><div class="stat-value" id="totalFiles">0</div><div class="stat-label">Załączniki</div></div>
+            <div class="stat-card"><div class="stat-value" id="totalSize">0 B</div><div class="stat-label">Łącznie</div></div>
+            <div class="stat-card"><div class="stat-value" id="categoriesCount">0</div><div class="stat-label">Typy plików</div></div>
+        </div>
+        <div id="filesContainer"><div class="empty-state">👆 Wgraj pliki .eml aby zacząć</div></div>
+        <div id="downloadSection" style="display:none;" class="download-all-row">
+            <button id="downloadAllBtn" class="btn-download btn-all">⬇️ Pobierz wszystko (ZIP)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── RFC 2047 decoder (=?charset?Q/B?encoded?=) ──────────────────────────────
+function decodeRFC2047(str) {
+    if (!str) return '';
+    str = str.replace(/\?=\s+=\?/g, '?==?');
+    return str.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, function(_, charset, encoding, encoded) {
+        try {
+            var bytes;
+            if (encoding.toUpperCase() === 'B') {
+                var bin = atob(encoded);
+                bytes = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            } else {
+                var qp = encoded.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, function(__, h) {
+                    return String.fromCharCode(parseInt(h, 16));
+                });
+                bytes = new Uint8Array(qp.length);
+                for (var j = 0; j < qp.length; j++) bytes[j] = qp.charCodeAt(j);
+            }
+            return new TextDecoder(charset).decode(bytes);
+        } catch(e) { return encoded; }
+    });
+}
+
+// ── Unfold MIME header lines (tab/space continuation) ───────────────────────
+function unfoldHeaders(text) {
+    return text.replace(/\r?\n[ \t]+/g, ' ');
+}
+
+// ── Parse header block text into key→value map ──────────────────────────────
+function parseHeaderBlock(block) {
+    var headers = {};
+    var lines = unfoldHeaders(block).split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+        var idx = lines[i].indexOf(':');
+        if (idx < 0) continue;
+        var key = lines[i].slice(0, idx).trim().toLowerCase();
+        var val = lines[i].slice(idx + 1).trim();
+        if (key && !headers[key]) headers[key] = val;
+    }
+    return headers;
+}
+
+// ── Parse "value; param=val; param2=val2" ───────────────────────────────────
+function parseHeaderValue(raw) {
+    if (!raw) return { value: '', params: {} };
+    var parts = raw.split(';');
+    var value = parts[0].trim().toLowerCase();
+    var params = {};
+    for (var i = 1; i < parts.length; i++) {
+        var eq = parts[i].indexOf('=');
+        if (eq < 0) continue;
+        var k = parts[i].slice(0, eq).trim().toLowerCase();
+        var v = parts[i].slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        params[k] = decodeRFC2047(v);
+    }
+    return { value: value, params: params };
+}
+
+// ── Recursively walk MIME parts ──────────────────────────────────────────────
+function walkParts(rawContent, headers, attachments, emlFileName) {
+    var ct = parseHeaderValue(headers['content-type'] || '');
+    var mimeType = ct.value;
+
+    if (mimeType.startsWith('multipart/')) {
+        // Find boundary
+        var boundary = ct.params['boundary'];
+        if (!boundary) {
+            var bm = (headers['content-type'] || '').match(/boundary=["']?([^"';\s\r\n]+)["']?/i);
+            if (bm) boundary = bm[1];
+        }
+        if (!boundary) return;
+
+        // Split on MIME boundary delimiter
+        var escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var delimRe = new RegExp('(?:^|\r?\n)--' + escaped + '(?:--)?(?:\r?\n|$)', 'g');
+
+        // Find all split positions
+        var positions = [];
+        var m;
+        while ((m = delimRe.exec(rawContent)) !== null) {
+            positions.push({ index: m.index, end: m.index + m[0].length });
+        }
+
+        for (var i = 0; i < positions.length - 1; i++) {
+            var piece = rawContent.slice(positions[i].end, positions[i + 1].index);
+            if (!piece.trim()) continue;
+
+            // Split headers from body within this part
+            var sepMatch = piece.match(/\r?\n\r?\n/);
+            if (!sepMatch) continue;
+            var sepIdx = sepMatch.index;
+            var partHeaderRaw = piece.slice(0, sepIdx);
+            var partBody = piece.slice(sepIdx + sepMatch[0].length);
+
+            var partHeaders = parseHeaderBlock(partHeaderRaw);
+            walkParts(partBody, partHeaders, attachments, emlFileName);
+        }
+        return;
+    }
+
+    // Check if this part is an attachment
+    var cdRaw = headers['content-disposition'] || '';
+    var cd = parseHeaderValue(cdRaw);
+    var ctRaw = headers['content-type'] || '';
+
+    // Extract filename: try disposition params first, then content-type name param, then raw regex
+    var fileName = cd.params['filename'] || cd.params['filename*'] || ct.params['name'] || '';
+
+    if (!fileName) {
+        // Try encoded filename in raw headers
+        var rawAll = cdRaw + ' ' + ctRaw;
+        var fnm = rawAll.match(/(?:filename|name)\*?=["']?(=\?[^"';\r\n]+\?=)["']?/i);
+        if (fnm) fileName = decodeRFC2047(fnm[1]);
+    }
+
+    if (!fileName) return; // not an attachment with a filename
+
+    var enc = (headers['content-transfer-encoding'] || '').trim().toLowerCase();
+    var buffer;
+    try {
+        var bodyTrimmed = rawContent.trim();
+        if (enc === 'base64') {
+            var clean = bodyTrimmed.replace(/\s+/g, '');
+            var bin = atob(clean);
+            buffer = new Uint8Array(bin.length);
+            for (var bi = 0; bi < bin.length; bi++) buffer[bi] = bin.charCodeAt(bi);
+        } else if (enc === 'quoted-printable') {
+            var qp2 = bodyTrimmed
+                .replace(/=\r?\n/g, '')
+                .replace(/=([0-9A-Fa-f]{2})/g, function(_, h) { return String.fromCharCode(parseInt(h, 16)); });
+            buffer = new TextEncoder().encode(qp2);
+        } else {
+            buffer = new TextEncoder().encode(bodyTrimmed);
+        }
+    } catch(e) {
+        console.warn('Blad dekodowania:', fileName, e);
+        return;
+    }
+
+    attachments.push({
+        name: fileName,
+        type: getFileType(mimeType, fileName),
+        mime: mimeType || 'application/octet-stream',
+        data: buffer,
+        emlFile: emlFileName,
+        size: buffer.length
+    });
+}
+
+// ── Main EML parser ──────────────────────────────────────────────────────────
+function parseEML(fileContent, emlFileName) {
+    var normalized = fileContent.replace(/\r\n/g, '\n');
+    var topSep = normalized.indexOf('\n\n');
+    if (topSep < 0) return [];
+    var topHeaderRaw = normalized.slice(0, topSep);
+    var topBody = normalized.slice(topSep + 2);
+    var topHeaders = parseHeaderBlock(topHeaderRaw);
+    var attachments = [];
+    walkParts(topBody, topHeaders, attachments, emlFileName);
+    return attachments;
+}
+
+// ── File type detection ──────────────────────────────────────────────────────
+var MIME_MAP = {
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
+    'application/msword': 'Word',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
+    'application/vnd.ms-excel': 'Excel',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+    'application/vnd.ms-powerpoint': 'PowerPoint',
+    'application/pdf': 'PDF',
+    'image/jpeg': 'Obrazy', 'image/png': 'Obrazy', 'image/gif': 'Obrazy', 'image/webp': 'Obrazy',
+    'text/plain': 'Tekst', 'text/csv': 'CSV',
+    'application/zip': 'Archiwum', 'application/x-rar-compressed': 'Archiwum', 'application/x-7z-compressed': 'Archiwum'
+};
+var EXT_MAP = {
+    doc:'Word', docx:'Word', xls:'Excel', xlsx:'Excel', ppt:'PowerPoint', pptx:'PowerPoint',
+    pdf:'PDF', jpg:'Obrazy', jpeg:'Obrazy', png:'Obrazy', gif:'Obrazy', webp:'Obrazy',
+    zip:'Archiwum', rar:'Archiwum', '7z':'Archiwum', csv:'CSV',
+    txt:'Tekst', log:'Tekst', md:'Tekst', json:'Tekst', xml:'Tekst'
+};
+var TYPE_ICONS = {
+    Word:'📄', Excel:'📊', PowerPoint:'🎯', PDF:'📕',
+    Obrazy:'🖼️', Archiwum:'📦', CSV:'📋', Tekst:'📝', Inne:'📎'
+};
+
+function getFileType(mimeType, fileName) {
+    if (MIME_MAP[mimeType]) return MIME_MAP[mimeType];
+    var ext = (fileName.split('.').pop() || '').toLowerCase();
+    return EXT_MAP[ext] || 'Inne';
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+function formatSize(bytes) {
+    if (!bytes) return '0 B';
+    var units = ['B','KB','MB','GB'];
+    var i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
+    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function downloadBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function downloadFile(att) { downloadBlob(new Blob([att.data], { type: att.mime }), att.name); }
+function downloadZip(list, name) {
+    if (!list.length) return;
+    var zip = new JSZip();
+    list.forEach(function(a) { zip.file(a.name, a.data); });
+    zip.generateAsync({ type: 'blob' }).then(function(blob) { downloadBlob(blob, name + '.zip'); });
+}
+
+// ── UI state ─────────────────────────────────────────────────────────────────
+var attachments = [];
+var currentView = 'list';
+
+var dropZone       = document.getElementById('dropZone');
+var fileInput      = document.getElementById('fileInput');
+var filesContainer = document.getElementById('filesContainer');
+var viewListBtn    = document.getElementById('viewListBtn');
+var viewCatBtn     = document.getElementById('viewCategoryBtn');
+var downloadAllBtn = document.getElementById('downloadAllBtn');
+var statsDiv       = document.getElementById('stats');
+var downloadSection = document.getElementById('downloadSection');
+var statusMsg      = document.getElementById('statusMsg');
+var _statusTimer;
+
+function showStatus(msg, type) {
+    type = type || 'info';
+    statusMsg.textContent = msg;
+    statusMsg.className = 'status show ' + type;
+    clearTimeout(_statusTimer);
+    _statusTimer = setTimeout(function() { statusMsg.classList.remove('show'); }, 6000);
+}
+
+function updateStats() {
+    if (!attachments.length) { statsDiv.style.display = 'none'; return; }
+    document.getElementById('totalFiles').textContent = attachments.length;
+    document.getElementById('totalSize').textContent = formatSize(attachments.reduce(function(s,a) { return s + a.size; }, 0));
+    document.getElementById('categoriesCount').textContent = new Set(attachments.map(function(a) { return a.type; })).size;
+    statsDiv.style.display = 'grid';
+}
+
+function renderListView() {
+    if (!attachments.length) { filesContainer.innerHTML = '<div class="empty-state">Brak załączników</div>'; return; }
+    var html = '<div class="file-list">';
+    attachments.forEach(function(a, i) {
+        html += '<div class="file-item"><div class="file-info"><div class="file-icon">' + (TYPE_ICONS[a.type]||'📎') + '</div>' +
+            '<div class="file-details"><div class="file-name" title="' + esc(a.name) + '">' + esc(a.name) + '</div>' +
+            '<div class="file-meta">' + esc(a.type) + ' · ' + formatSize(a.size) + ' · ' + esc(a.emlFile) + '</div></div></div>' +
+            '<button class="btn-small" onclick="dl(' + i + ')">Pobierz</button></div>';
+    });
+    html += '</div>';
+    filesContainer.innerHTML = html;
+}
+
+function renderCategoryView() {
+    if (!attachments.length) { filesContainer.innerHTML = '<div class="empty-state">Brak załączników</div>'; return; }
+    var cats = {};
+    attachments.forEach(function(a, i) { if (!cats[a.type]) cats[a.type] = []; cats[a.type].push(Object.assign({}, a, {idx:i})); });
+    var html = '';
+    Object.keys(cats).sort().forEach(function(cat) {
+        var items = cats[cat];
+        html += '<div class="category-section"><div class="category-header">' +
+            '<div class="category-title-group"><div class="category-icon">' + (TYPE_ICONS[cat]||'📎') + '</div>' +
+            '<div class="category-info"><h3>' + esc(cat) + '</h3><p>' + items.length + ' plik' + (items.length !== 1 ? 'ów' : '') + '</p></div></div>' +
+            '<button class="btn-download" onclick="dlCat(\'' + esc(cat) + '\')">ZIP</button></div>';
+        items.forEach(function(item) {
+            html += '<div class="category-file-item"><div class="file-details" style="flex:1;min-width:0;">' +
+                '<div class="file-name" title="' + esc(item.name) + '">' + esc(item.name) + '</div>' +
+                '<div class="file-meta">' + formatSize(item.size) + ' · ' + esc(item.emlFile) + '</div></div>' +
+                '<button class="btn-small" onclick="dl(' + item.idx + ')">Pobierz</button></div>';
+        });
+        html += '</div>';
+    });
+    filesContainer.innerHTML = html;
+}
+
+function render() {
+    updateStats();
+    downloadSection.style.display = attachments.length ? 'block' : 'none';
+    if (currentView === 'list') renderListView(); else renderCategoryView();
+}
+
+window.dl = function(i) { downloadFile(attachments[i]); showStatus('Pobieranie…', 'success'); };
+window.dlCat = function(cat) {
+    var list = attachments.filter(function(a) { return a.type === cat; });
+    downloadZip(list, cat);
+    showStatus('Pobieranie ' + list.length + ' pliku/ów…', 'success');
+};
+downloadAllBtn.addEventListener('click', function() {
+    downloadZip(attachments, 'wszystkie_zalaczniki');
+    showStatus('Pobieranie wszystkich plików…', 'success');
+});
+
+// ── Przetwarza tekst pojedynczego .eml i dodaje wyniki do tablicy ────────────
+function processEmlText(text, emlName) {
+    var found = parseEML(text, emlName);
+    attachments = attachments.concat(found);
+    return found.length;
+}
+
+// ── Obsługuje wgrany plik .zip — szuka w nim .eml i je parsuje ───────────────
+function handleZip(file, onDone) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        JSZip.loadAsync(e.target.result).then(function(zip) {
+            var emlFiles = [];
+            zip.forEach(function(relativePath, zipEntry) {
+                if (!zipEntry.dir && relativePath.toLowerCase().endsWith('.eml')) {
+                    emlFiles.push({ path: relativePath, entry: zipEntry });
+                }
+            });
+
+            if (!emlFiles.length) { onDone(0, 0); return; }
+
+            var done = 0;
+            var total = emlFiles.length;
+            var found = 0;
+            emlFiles.forEach(function(ef) {
+                ef.entry.async('string').then(function(text) {
+                    // Nazwa wyświetlana: "plik.zip / subfolder/mail.eml"
+                    var displayName = file.name + ' / ' + ef.path;
+                    found += processEmlText(text, displayName);
+                    if (++done === total) onDone(total, found);
+                });
+            });
+        }).catch(function(err) {
+            console.warn('Błąd odczytu ZIP:', err);
+            onDone(0, 0);
+        });
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function handleFiles(files) {
+    if (!files.length) return;
+    attachments = [];
+
+    var fileList = Array.from(files);
+    var emlFiles = fileList.filter(function(f) { return f.name.toLowerCase().endsWith('.eml'); });
+    var zipFiles = fileList.filter(function(f) { return f.name.toLowerCase().endsWith('.zip'); });
+
+    var totalJobs = emlFiles.length + zipFiles.length;
+    var doneJobs  = 0;
+    var totalEmlsFound = 0;
+
+    showStatus('Przetwarzam ' + totalJobs + ' plik' + (totalJobs > 1 ? 'i' : '') + '…', 'info');
+
+    function jobDone() {
+        doneJobs++;
+        if (doneJobs < totalJobs) return;
+        // Wszystkie pliki przetworzone
+        if (!attachments.length) {
+            showStatus('❌ Nie znaleziono żadnych załączników', 'error');
+            filesContainer.innerHTML = '<div class="empty-state">Brak załączników w podanych plikach</div>';
+        } else {
+            var msg = '✅ Znaleziono ' + attachments.length + ' załącznik' + (attachments.length > 1 ? 'ów' : '');
+            if (zipFiles.length) msg += ' (z ' + totalEmlsFound + ' maili .eml w ZIP)';
+            showStatus(msg, 'success');
+        }
+        render();
+    }
+
+    // Bezpośrednie pliki .eml
+    emlFiles.forEach(function(file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            processEmlText(e.target.result, file.name);
+            jobDone();
+        };
+        reader.readAsText(file, 'utf-8');
+    });
+
+    // Pliki .zip
+    zipFiles.forEach(function(file) {
+        handleZip(file, function(emlCount, attCount) {
+            totalEmlsFound += emlCount;
+            jobDone();
+        });
+    });
+
+    // Fallback — jeśli nie ma żadnych pasujących plików
+    if (totalJobs === 0) {
+        showStatus('❌ Brak plików .eml ani .zip', 'error');
+    }
+}
+
+dropZone.addEventListener('click', function() { fileInput.click(); });
+dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('dragover'); });
+dropZone.addEventListener('drop', function(e) { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', function(e) { handleFiles(e.target.files); });
+
+viewListBtn.addEventListener('click', function() {
+    currentView = 'list';
+    viewListBtn.classList.add('active'); viewCatBtn.classList.remove('active');
+    render();
+});
+viewCatBtn.addEventListener('click', function() {
+    currentView = 'category';
+    viewCatBtn.classList.add('active'); viewListBtn.classList.remove('active');
+    render();
+});
+</script>
+
+    <!-- Stopka prywatności -->
+    <div style="background:#1e1b4b;color:#c7d2fe;padding:2rem;font-size:13px;line-height:1.7;">
+        <div style="max-width:860px;margin:0 auto;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:2rem;margin-bottom:1.75rem;">
+                <div>
+                    <p style="color:#a5b4fc;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.75rem;">🔒 Prywatność i bezpieczeństwo danych</p>
+                    <p style="margin:0;">Narzędzie działa w całości w Twojej przeglądarce internetowej (<strong style="color:#e0e7ff;">client-side</strong>). Wgrane pliki .eml i .zip są odczytywane wyłącznie przez JavaScript działający lokalnie na Twoim komputerze. <strong style="color:#e0e7ff;">Żadne dane nie są przesyłane do Internetu.</strong></p>
+                </div>
+                <div>
+                    <p style="color:#a5b4fc;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.75rem;">💾 Przechowywanie danych</p>
+                    <p style="margin:0;">Narzędzie <strong style="color:#e0e7ff;">nie zapisuje żadnych danych</strong> — ani w bazie danych, ani w plikach cookies, ani w localStorage przeglądarki. Pliki istnieją tylko w pamięci RAM przez czas trwania sesji. Po zamknięciu lub odświeżeniu karty wszystkie dane znikają bezpowrotnie.</p>
+                </div>
+                <div>
+                    <p style="color:#a5b4fc;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.75rem;">🌐 Połączenia sieciowe</p>
+                    <p style="margin:0;">Strona pobiera jedną zewnętrzną bibliotekę (<strong style="color:#e0e7ff;">JSZip</strong> z cdnjs.cloudflare.com) służącą do obsługi plików ZIP. To jedyne połączenie z siecią. Treść Twoich plików nigdy nie opuszcza urządzenia.</p>
+                </div>
+            </div>
+            <div style="border-top:1px solid #312e81;padding-top:1.25rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.75rem;">
+                <p style="margin:0;color:#818cf8;">
+                    📧 <strong style="color:#e0e7ff;">EML Attachment Extractor</strong> &nbsp;·&nbsp; Narzędzie wewnętrzne &nbsp;·&nbsp; Przetwarzanie lokalne, brak serwera
+                </p>
+                <p style="margin:0;color:#6366f1;font-size:12px;">Dane pozostają wyłącznie na Twoim urządzeniu</p>
+            </div>
+        </div>
+    </div>
+
+</div>
+</body>
+</html>
